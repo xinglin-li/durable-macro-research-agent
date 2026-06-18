@@ -1,8 +1,8 @@
-# context-rag-memory-skills
+# durable-macro-research-agent
 
 A framework-free, test-driven Agent Runtime with context assembly, hybrid retrieval, four-type memory system, context pruning and budget reporting, progressive skill activation, and V2 Structured ReAct trajectory tracing.
 
-This repository builds on [agent-runtime-lab](https://github.com/xinglin-li/agent-runtime-lab). It keeps the same core premise: the model can propose text or tool calls, but deterministic runtime code owns state transitions, validation, side effects, trace events, and safety boundaries.
+This repository builds on [context-rag-memory-skills](https://github.com/xinglin-li/context-rag-memory-skills). It keeps the same core premise: the model can propose text or tool calls, but deterministic runtime code owns state transitions, validation, side effects, trace events, and safety boundaries.
 
 ## Project Status
 
