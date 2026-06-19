@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0.0",
     "fastapi",
+    "langgraph",
+    "langgraph-checkpoint-sqlite>=3.0.1",
     "uvicorn",
     "httpx",
     "python-dotenv",

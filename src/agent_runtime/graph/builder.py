@@ -1,4 +1,5 @@
 # src/agent_runtime/graph/builder.py
+from typing import Optional, Any
 from langgraph.graph import StateGraph, START, END
 from agent_runtime.graph.state import MacroAgentState
 from agent_runtime.graph.nodes import (
@@ -10,7 +11,7 @@ from agent_runtime.graph.nodes import (
 )
 from agent_runtime.graph.edges import decide_next_action
 
-def create_macro_agent_graph():
+def create_macro_agent_graph(checkpointer: Optional[Any] = None):
     """使用最底层的 StateGraph API 组装宏观研究智能体状态机拓扑"""
     # 1. 传入带类型的状态定义初始化图底座
     workflow = StateGraph(MacroAgentState)
@@ -47,4 +48,4 @@ def create_macro_agent_graph():
     workflow.add_edge("finalize", END)
     
     # 5. 编译图，生成确定性的可执行运行时骨架
-    return workflow.compile()
+    return workflow.compile(checkpointer=checkpointer)
