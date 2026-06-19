@@ -1,16 +1,13 @@
 # src/agent_runtime/graph/service.py
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List
+from langgraph.types import Command
 from agent_runtime.graph.persistence import CheckpointPersistenceManager
 from agent_runtime.graph.builder import create_macro_agent_graph
 
 class MacroAgentGraphService:
-    """虚拟机服务管理器：负责驱动 Thread 隔离、崩溃恢复与时间旅行回溯"""
-    
     def __init__(self, db_path: str = ":memory:"):
-        # 1. 实例化底层硬持久化器
         self._persistence = CheckpointPersistenceManager.create_sqlite_checkpointer(db_path)
         self.checkpointer = self._persistence.__enter__()
-        # 2. 将持久化器注入到图运行时中并编译
         self.graph = create_macro_agent_graph(checkpointer=self.checkpointer)
 
     def close(self) -> None:
@@ -21,31 +18,33 @@ class MacroAgentGraphService:
             self.close()
         except Exception:
             pass
-        
+
     def run_workflow(self, thread_id: str, run_id: str, user_query: str) -> Dict[str, Any]:
-        """开启或接续一个特定 thread_id 的执行流"""
-        # 控制配置字典： thread_id 是 LangGraph 区分多会话路由的唯一主键
+        config = {"configurable": {"thread_id": thread_id}}
+        initial_state = {"thread_id": thread_id, "run_id": run_id, "user_query": user_query, "status": "running"}
+        
+        # 使用 stream 模式或普通 invoke。当遇到节点内部的 interrupt 时，图会在此处优雅中断抛出，
+        # 并将最新的 Checkpoint 存入数据库。我们使用 invoke 接收返回的状态
+        return self.graph.invoke(initial_state, config=config)
+
+    def resume_workflow(self, thread_id: str, review_action: dict) -> Dict[str, Any]:
+        """向处于中断挂起状态的 Thread 虚拟机注入外部人工审查判决，使其原地复活"""
         config = {"configurable": {"thread_id": thread_id}}
         
-        initial_state ={
-            "thread_id": thread_id,
-            "run_id": run_id,
-            "user_query": user_query,
-            "status": "running"
-        }
-        # 通过传入 config，让运行时自动读取、追加该 thread 的最新检查点
-        return self.graph.invoke(initial_state, config=config)
-    
+        # 利用 langgraph.types.Command 优雅传递恢复数据给上一次阻断的 interrupt 接收器
+        # 这就是原生支持 Durable Execution 的高级恢复指令
+        resume_command = Command(resume=review_action)
+        
+        # 传入包含 Command 的指令和对应的 Thread 隔离配置，驱动图向下推进
+        return self.graph.invoke(resume_command, config=config)
+
     def get_state_history(self, thread_id: str) -> List[Dict[str, Any]]:
-        """回溯当前 Thread 的快照时间线，暴露每一个历史版本的镜像"""
         config = {"configurable": {"thread_id": thread_id}}
         history_chain = []
-        
-        # get_state_history 会由新到旧迭代返回当前 thread 所有的历史 CheckpointTuple
         for state_snapshot in self.graph.get_state_history(config):
             history_chain.append({
                 "checkpoint_id": state_snapshot.config["configurable"].get("checkpoint_id"),
                 "values": state_snapshot.values,
-                "next_nodes": state_snapshot.next, # 下一步即将激活哪一个节点
+                "next_nodes": state_snapshot.next,
             })
         return history_chain
