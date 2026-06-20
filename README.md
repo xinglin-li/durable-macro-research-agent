@@ -1,133 +1,134 @@
 # durable-macro-research-agent
 
-A framework-free, test-driven Agent Runtime with context assembly, hybrid retrieval, four-type memory system, context pruning and budget reporting, progressive skill activation, and V2 Structured ReAct trajectory tracing.
+A test-driven macro research agent that combines LangGraph durable execution, human-in-the-loop approval, asynchronous jobs, crash recovery, MCP tool bridging, and deterministic security controls.
 
-This repository builds on [context-rag-memory-skills](https://github.com/xinglin-li/context-rag-memory-skills). It keeps the same core premise: the model can propose text or tool calls, but deterministic runtime code owns state transitions, validation, side effects, trace events, and safety boundaries.
+This repository builds on [context-rag-memory-skills](https://github.com/xinglin-li/context-rag-memory-skills). The earlier project established the context, retrieval, memory, skills, tool-validation, and structured ReAct layers. This iteration adds a durable orchestration layer for long-running macro research workflows.
+
+The core premise remains unchanged: the model may propose work, but deterministic runtime code owns state transitions, approvals, side effects, persistence, retries, and security boundaries.
 
 ## Project Status
 
 This is an educational runtime lab and prototype, not a production agent platform.
 
-It is designed to make agent mechanics visible and testable:
+It is designed to make durable agent mechanics visible and testable:
 
-- V2 Structured ReAct runtime loop with `AgentStep`, `PlannerRationale`, `ToolObservation`, `StopReason`
-- trajectory trace with causal event ordering verification
-- typed tool calls and validation
-- context assembly with pruning, deduplication, and priority-based retention
-- `ContextBudgetReport` with utilization tracking and lost-in-the-middle warnings
-- BM25 and vector hybrid retrieval with citation formatting
-- prompt-injection trust boundaries (`system_trusted` | `retrieved_untrusted` | `user_supplied`)
-- four-type memory: Working, Episodic, Semantic, Long-Term
-- `WorkingMemory` model for active cognitive state
-- `EpisodeRecord` and `MemoryCondenser` for past run compression
-- SQLite-backed memory store with namespace isolation and episodic query
-- skill discovery and progressive disclosure
-- context pruning of stale low-priority items
+- LangGraph state machine with explicit conditional routing
+- SQLite-backed LangGraph checkpoints keyed by `thread_id`
+- human approval through `interrupt()` and `Command(resume=...)`
+- approve, reject, and edit/replan control paths
+- asynchronous job submission with idempotency keys
+- non-blocking job polling across graph invocations
+- worker retries, terminal failures, and cooperative cancellation
+- crash/restart recovery from persisted checkpoints
+- append-only audit events and deduplicating reducers
+- artifact references in graph state instead of large result payloads
+- framework-free MCP stdio client over JSON-RPC 2.0
+- dynamic MCP-to-native-tool bridge
+- governed capability registry, RBAC, schema checks, and HITL policy routing
+- inherited context, RAG, memory, skills, tools, tracing, and FastAPI runtime layers
 
-Requires Python 3.11+. Tested locally with Python 3.12.
+Requires Python 3.11+.
 
-## What Changed From The Previous Version
+## What Changed From The Previous Project
 
-The previous version focused on the runtime core:
+[context-rag-memory-skills](https://github.com/xinglin-li/context-rag-memory-skills) focused on preparing reliable model context and controlling a bounded ReAct loop:
 
-- provider adapter boundary
-- tool registry allowlist
-- Pydantic tool validation
-- retry policy
-- async execution
-- subprocess allowlist
-- FastAPI run lifecycle
+- context assembly, pruning, and token-budget reporting
+- BM25 and vector hybrid retrieval
+- citation construction and retrieved-content trust boundaries
+- working, episodic, semantic, and long-term memory
+- progressive skill discovery and activation
+- typed tool calls, validation, traces, and bounded execution
 
-This version keeps those pieces and adds:
+This project keeps those modules and adds a durable execution plane:
 
-- **V2 Structured ReAct Loop** — `AgentStep` trajectory, `PlannerRationale`, `ToolObservation`, `StopReason`
-- **Trajectory Trace Tests** — causal ordering: rationale → action → execution → observation → stop_reason
-- **Four-Type Memory System** — Working, Episodic, Semantic, Long-Term
-- **`WorkingMemory`** — active cognitive state snapshot (constraints, budget, loop position)
-- **`EpisodeRecord` + `MemoryCondenser`** — compact past run snapshots from `AgentState`
-- **`ContextPruner`** — stale item removal by age, low-priority overflow cut
-- **`ContextBudgetReport`** — structured report with utilization_ratio, trust/kind distributions, lost-in-middle warning
-- **Lost-in-the-Middle Mitigation** — positional reordering when >8 items and >90% utilization
-- **`ContextAssembler`** upgraded to return `(ContextBundle, ContextBudgetReport)` tuple
-- `ContextItem` trust levels: `system_trusted`, `application_trusted`, `user_supplied`, `retrieved_untrusted`
-- BM25 lexical retrieval + deterministic fake vector retrieval
-- Reciprocal Rank Fusion for hybrid retrieval
-- citation map construction for retrieved evidence
-- SQLite memory store with namespace isolation, episodic query (`list_episodes_by_namespace`), and upsert semantics
-- memory write policy against persistent prompt injection
-- `SkillLoader` and `SkillSelector` with progressive disclosure
-- progressive skill activation that indexes only skill metadata until a skill is selected
-- runtime integration that passes assembled context into the provider as a system message, records `ContextBudgetReport` in trace
+- **LangGraph Orchestration** — a typed `MacroAgentState` and explicit node/edge routing
+- **Durable Checkpoints** — SQLite checkpoint history scoped by `thread_id`
+- **Human-in-the-Loop Control** — plans can be approved, rejected, or edited before execution
+- **Dynamic Replanning** — edited plans return to the approval boundary for a second decision
+- **Asynchronous Job Lifecycle** — queued, running, succeeded, failed, cancel-requested, and cancelled states
+- **Idempotent Submission** — repeated graph execution returns the existing job for the same idempotency key
+- **Pause Instead of Busy Polling** — pending jobs end the current invocation and remain checkpointed
+- **Crash Recovery** — a new service instance can reload graph state and observe work completed while it was offline
+- **Artifact Indirection** — checkpoints retain `artifact_id` and URI metadata, not large CSV payloads
+- **MCP Stdio Client** — JSON-RPC `tools/list` and `tools/call` over subprocess pipes
+- **MCP Tool Bridge** — remote MCP metadata is wrapped as a local asynchronous callable
+- **Capability Governance** — registration, risk labels, role checks, argument-schema checks, token checks, and origin allowlists
+- **Auditable Reducers** — append-only traces plus deduplicated job and artifact collections
 
 ## Architecture
 
 ```text
 ==================================================================================================
-                         CONTEXT-RAG-MEMORY-SKILLS ARCHITECTURE
+                         DURABLE MACRO RESEARCH AGENT
 ==================================================================================================
 
-      [ User Input ]
-            |
-            v
-   +--------------------------+
-   |      AgentRuntime        |
-   |  run_id / state / trace  |
-   |  V2 ReAct loop           |
-   |  AgentStep / StopReason  |
-   +------------+-------------+
-                |
-                | pre-model context preparation
-                v
-   +--------------------------+        +--------------------------+
-   |      SkillSelector       |        | HybridRetrievalPipeline  |
-   | metadata-only routing    |        | BM25 + vector + RRF      |
-   | progressive disclosure   |        | citations + evidence     |
-   +------------+-------------+        +------------+-------------+
-                |                                   |
-                v                                   v
-   +--------------------------+        +--------------------------+
-   |      SkillLoader         |        | Retrieved Evidence       |
-   | load full SKILL.md only  |        | trust=retrieved_untrusted|
-   | after activation         |        +--------------------------+
-   +------------+-------------+
-                |
-                v
-   +--------------------------+
-   | SQLiteMemoryStore        |
-   | namespace-scoped memory  |
-   | episodic + long-term     |
-   +------------+-------------+
-                |
-                v
-   +--------------------------+
-   |    Context Control Layer |
-   |                          |
-   |  deduplicate             |
-   |  -> ContextPruner (stale)|
-   |  -> priority sort        |
-   |  -> budget truncation    |
-   |  -> lost-in-middle reord |
-   |  -> ContextBudgetReport  |
-   +------------+-------------+
-                |
-                v
-   +--------------------------+
-   | Provider Input           |
-   | system context message   |
-   | + conversation history   |
-   +------------+-------------+
-                |
-                v
-   +--------------------------+
-   | ToolRegistry / Tools     |
-   | allowlist + validation   |
-   +--------------------------+
+  [ User Request ]
+         |
+         v
+  +-------------------------+
+  | Parse Request           |
+  | intent / target / trace |
+  +------------+------------+
+               |
+               v
+  +-------------------------+       SQLite checkpoint history
+  | Assemble Context & Plan |<--------------------------------+
+  +------------+------------+                                 |
+               |                                              |
+               v                                              |
+  +-------------------------+                                 |
+  | Conditional Router      |                                 |
+  | approval / submit /     |                                 |
+  | poll / finalize / stop  |                                 |
+  +---+-----------------+---+                                 |
+      |                 |                                     |
+      | approval needed | execution ready                     |
+      v                 v                                     |
+  +----------------+  +-------------------------+             |
+  | Human Review   |  | MCP Policy Gateway      |             |
+  | interrupt()    |  | registry / RBAC /       |             |
+  | approve/edit/  |  | schema / risk controls  |             |
+  | reject         |  +------------+------------+             |
+  +-------+--------+               |                          |
+          |                        v                          |
+          |             +-------------------------+           |
+          |             | Idempotent Job Store    |           |
+          |             | JobRecord + status      |           |
+          |             +------------+------------+           |
+          |                          |                        |
+          |              pause while queued/running           |
+          |                          |                        |
+          |                          v                        |
+          |             +-------------------------+           |
+          |             | Async Worker            |           |
+          |             | retry / cancellation /  |           |
+          |             | artifact production     |           |
+          |             +------------+------------+           |
+          |                          |                        |
+          +--------------------------+------------------------+
+                                     |
+                                     v
+                         +-------------------------+
+                         | Poll Restored Job State |
+                         | persist artifact refs   |
+                         +------------+------------+
+                                      |
+                                      v
+                         +-------------------------+
+                         | Final Report            |
+                         | answer + evidence URI   |
+                         +-------------------------+
+
+  External MCP path:
+
+  MCP Server subprocess <-> AsyncMcpStdioClient <-> McpToolBridge <-> governed runtime capability
 ```
 
 ## Repository Layout
 
 ```text
-context-rag-memory-skills/
+durable-macro-research-agent/
   pyproject.toml
   README.md
   LICENSE
@@ -153,57 +154,57 @@ context-rag-memory-skills/
       errors.py
       models.py
       tracing.py
-      context/
-        assembler.py
-        budget.py
-        dedup.py
+      graph/
+        builder.py
+        edges.py
+        nodes.py
+        persistence.py
+        reducers.py
+        service.py
+        state.py
+      jobs/
         models.py
-        pruner.py
-      memory/
-        condenser.py
+        store.py
+        worker.py
+      mcp/
+        bridge.py
+        client.py
+      mcp_clients/
         models.py
         policy.py
-        sqlite_store.py
-        working_memory.py
-      providers/
-        base.py
-        fake_provider.py
-      retrieval/
-        bm25.py
-        chunker.py
-        citations.py
-        embeddings.py
-        hybrid.py
-        models.py
-        pipeline.py
-        reranker.py
-        tokenizer.py
-        vector_index.py
-      runtime/
-        async_executor.py
-        loop.py
-        state.py
-        steps.py
-      skills/
-        loader.py
-        models.py
-        selector.py
-      tools/
-        arithmetic.py
-        base.py
-        idempotency_writer.py
         registry.py
-        script_runner.py
+      context/
+      memory/
+      providers/
+      retrieval/
+      runtime/
+      skills/
+      tools/
   tests/
 ```
 
 ## Quick Start
 
-Install the project in editable mode:
+Create and activate a virtual environment, then install the project in editable mode:
 
 ```bash
-pip install -e .
-pip install pytest pytest-asyncio
+python -m venv .venv
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
+python -m pip install pytest pytest-asyncio
+```
+
+macOS or Linux:
+
+```bash
+source .venv/bin/activate
+python -m pip install -e .
+python -m pip install pytest pytest-asyncio
 ```
 
 Run the full test suite:
@@ -212,19 +213,15 @@ Run the full test suite:
 pytest -q
 ```
 
-Expected result at the time of writing:
-
-```text
-68 passed
-```
-
-Run focused context, retrieval, memory, and skills tests:
+Run the durable workflow and MCP-focused tests:
 
 ```bash
-pytest tests/test_context_integration.py tests/test_skill_loader.py tests/test_skill_activation.py -v
+pytest tests/test_durable_macro_agent.py tests/test_graph_approval.py tests/test_graph_persistence.py -v
+pytest tests/test_job_worker.py tests/test_job_cancellation.py -v
+pytest tests/test_mcp_client_bridge.py tests/test_mcp_capability_registry.py tests/test_mcp_approval_policy.py -v
 ```
 
-Run the FastAPI service:
+Run the inherited FastAPI service:
 
 ```bash
 uvicorn agent_runtime.api:app --reload
@@ -236,242 +233,319 @@ Health check:
 curl http://127.0.0.1:8000/health
 ```
 
-## Core Concepts
+## Durable Workflow Example
 
-### 1. V2 Structured ReAct Runtime
-
-The runtime loop follows a structured ReAct pattern with explicit trajectory models:
-
-```text
-observe state
- -> produce PlannerRationale (compact summary, NOT raw CoT)
- -> choose typed ToolAction
- -> validate tool schema
- -> execute deterministic tool
- -> record ToolObservation
- -> build AgentStep (rationale + action + observation)
- -> write StopReason on termination
- -> stop or continue
-```
-
-`AgentStep` trajectory is the minimum unit for future eval replay. Causal event ordering is verified by `test_trajectory_trace.py`.
-
-### 2. Four-Type Memory System
-
-The agent distinguishes four memory types explicitly:
-
-| Type | Model | Storage | Lifetime |
-|---|---|---|---|
-| **Working** | `WorkingMemory` | In-process | Single run |
-| **Episodic** | `EpisodeRecord` | SQLite (`memory_type="episodic"`) | Cross-run |
-| **Semantic** | RAG chunks, skill metadata | Documents, `skills/` | Persistent |
-| **Long-Term** | `MemoryRecord` | SQLite (key-value) | Cross-session |
-
-- **Working Memory** (`WorkingMemory`) — current run constraints, context budget, active skill, loop position. `is_budget_critical()` triggers when utilization >90% with lost-in-middle warning.
-- **Episodic Memory** (`EpisodeRecord` + `MemoryCondenser`) — condensed past run snapshot (task summary, key decisions, errors, outcome). Produced from `AgentState` via `MemoryCondenser.condense()`.
-- **Semantic Memory** — RAG documents, curated knowledge, skill metadata accessible through retrieval.
-- **Long-Term Memory** — cross-session facts, preferences, rules stored in `SQLiteMemoryStore`.
-
-### 3. Context Control Layer
-
-The context assembly pipeline runs in six steps per loop iteration:
-
-1. **Deduplicate** — remove identical content blocks
-2. **Prune** — drop stale low-priority items (`age_in_steps > max_age` && `priority < threshold`), then cut low-priority overflow when item count exceeds limit
-3. **Sort** — by priority descending
-4. **Truncate** — token budget with hard retention for `priority >= 100` system instructions
-5. **Reorder** — lost-in-the-middle mitigation: reorder so important items appear at both front and back of the list when >8 items
-6. **Report** — produce `ContextBudgetReport` with utilization ratio, trust/kind distributions, and lost-in-middle warning
-
-`ContextAssembler.assemble()` returns `(ContextBundle, ContextBudgetReport)`.
-
-### 4. ContextBudgetReport
-
-Each context assembly produces a structured report:
+The end-to-end test demonstrates the intended lifecycle:
 
 ```python
-class ContextBudgetReport:
-    total_items_submitted: int
-    items_after_dedup: int
-    items_pruned: int
-    items_dropped_by_budget: int
-    items_retained: int
-    estimated_tokens_used: int
-    max_tokens: int
-    utilization_ratio: float
-    lost_in_middle_warning: bool
-    trust_distribution: dict   # count by trust_level
-    kind_distribution: dict    # count by kind
+import asyncio
+
+from agent_runtime.graph.nodes import job_store
+from agent_runtime.graph.service import MacroAgentGraphService
+from agent_runtime.jobs.worker import AsyncMacroJobWorker
+
+
+async def main() -> None:
+    db_url = "file:macro_demo?mode=memory&cache=shared"
+    thread_id = "macro-thread-001"
+
+    service = MacroAgentGraphService(db_path=db_url)
+    worker = AsyncMacroJobWorker(job_store)
+    await worker.start()
+
+    try:
+        # The graph pauses at human approval.
+        service.run_workflow(
+            thread_id=thread_id,
+            run_id="run-001",
+            user_query="Run full rolling ARIMA for sales",
+        )
+
+        # Editing causes replanning and a second approval pause.
+        service.resume_workflow(
+            thread_id=thread_id,
+            review_action={
+                "action": "edited",
+                "updated_plan": {
+                    "task": "mcp_arima_forecast",
+                    "horizon": 3,
+                },
+            },
+        )
+
+        # Approval submits the asynchronous job and checkpoints waiting state.
+        waiting_state = service.resume_workflow(
+            thread_id=thread_id,
+            review_action={"action": "approved"},
+        )
+        print(waiting_state["status"])
+
+        await asyncio.sleep(0.08)
+
+        # A later invocation reloads the checkpoint, observes completion,
+        # and finalizes with an artifact reference.
+        final_state = service.run_workflow(
+            thread_id=thread_id,
+            run_id="run-002",
+            user_query="Resume",
+        )
+        print(final_state["final_answer"])
+    finally:
+        await worker.stop()
+        service.close()
+
+
+asyncio.run(main())
 ```
 
-The report is recorded in the runtime trace via `model_requested` event payload.
+## Core Concepts
 
-### 5. Trust Levels
+### 1. Typed Durable State
 
-Context items carry explicit trust levels:
+`MacroAgentState` separates state by responsibility:
 
-- `system_trusted`
-- `application_trusted`
-- `user_supplied`
-- `retrieved_untrusted`
+| State group | Representative fields | Merge behavior |
+| --- | --- | --- |
+| Identity and request | `thread_id`, `run_id`, `user_query`, `parsed_request` | latest value |
+| Planning and control | `analysis_plan`, `plan_status`, `approval_status`, `status` | latest value |
+| External work | `active_job_ids`, `completed_job_results`, `artifact_refs` | deduplicating reducers |
+| Audit data | `trace_events`, `errors`, `messages` | append-only reducer |
+| Delivery | `final_answer` | latest value |
 
-Retrieved evidence is passed to the model as data, not instructions. The runtime adds a system instruction that tells the provider to ignore any instruction-like text found in retrieved evidence.
+Large analytical outputs do not belong in graph state. The graph stores references such as:
 
-### 6. Hybrid Retrieval
-
-Retrieval uses two deterministic local routes:
-
-- `BM25Retriever` for lexical matching
-- `VectorIndex` with `FakeEmbeddingProvider` for stable semantic tests
-
-`ReciprocalRankFusion` combines rankings without assuming comparable score scales. `CitationBuilder` formats evidence blocks and returns a citation map for trace auditing.
-
-### 7. Progressive Skill Activation
-
-Skills live under `skills/*/SKILL.md` with frontmatter metadata:
-
-```yaml
----
-name: rolling-backtest
-description: Use this skill when evaluating forecasting designs...
-allowed_tools: ["run_approved_script"]
----
+```python
+{
+    "artifact_id": "art_job_async_123",
+    "uri": "storage://macro/processed_job_async_123.csv",
+}
 ```
 
-Discovery reads only lightweight metadata. The full skill body is loaded only after `SkillSelector` chooses a matching skill.
+This keeps checkpoints small enough to inspect, replay, and persist.
 
-This is intentionally different from ordinary RAG over file content. Skill selection is routing, not answer retrieval.
+### 2. Explicit Graph Routing
 
-### 8. Long-Term and Episodic Storage
+The graph is assembled from deterministic nodes:
 
-`SQLiteMemoryStore` provides a minimal local memory layer:
+```text
+START
+  -> parse_request
+  -> assemble_context
+  -> human_approval | submit_mcp_job | poll_job_status | finalize | END
+```
 
-- namespace isolation for multi-project multi-tenancy
-- lookup by namespace/key with upsert semantics
-- episodic query: `list_episodes_by_namespace()` returns recent past run summaries
-- `put_episode()` convenience wrapper with memory_type check
-- structured `MemoryRecord` and `EpisodeRecord` models
+The router evaluates, in order:
 
-`MemoryWritePolicy` rejects persistent prompt-injection-like content before it reaches storage.
+1. hard step limits
+2. terminal failure
+3. direct-answer intent
+4. approval state
+5. active-versus-completed job set difference
+6. final delivery readiness
 
-### 9. Memory Condensation
+Pending jobs return `pause` and end the current invocation. This prevents a graph call from busy-polling while long-running work is still executing.
 
-`MemoryCondenser` converts a complete `AgentState` into a compact `EpisodeRecord`:
+### 3. Human-in-the-Loop Approval
 
-- extracts user query as task summary
-- maps agent status to outcome (`completed`/`failed`/`cancelled`/`max_steps_exceeded`)
-- captures key decisions from each `AgentStep.action + rationale`
-- extracts error messages from failed `ToolObservation`s
-- discards raw message history
+`human_approval_node` calls LangGraph `interrupt()` with the proposed plan. A caller resumes the same thread with:
 
-### 10. Runtime Integration
+```python
+Command(resume={"action": "approved"})
+```
 
-Before calling the provider, `AgentRuntime`:
+Supported decisions:
 
-1. Activates matching skill via `SkillSelector`
-2. Executes `HybridRetrievalPipeline`
-3. Loads namespace memories from `SQLiteMemoryStore`
-4. Assembles context via `ContextAssembler` (pruning + budget + lost-in-middle)
-5. Records `ContextBudgetReport` in trace (utilization, dropped, pruned)
-6. Passes context as system message + conversation history to provider
-7. Runs V2 Structured ReAct loop with `AgentStep` construction
+- `approved` — continue toward guarded execution
+- `rejected` — skip tool execution and finalize as failed
+- `edited` — replace the plan and return to the approval boundary
+
+The edit path intentionally requires a second decision after replanning.
+
+### 4. Checkpointing and Recovery
+
+`CheckpointPersistenceManager` owns the lifecycle of LangGraph's SQLite checkpointer. Every workflow uses a `thread_id` as its durable identity.
+
+Checkpoint history exposes:
+
+- checkpoint IDs
+- state values at each transition
+- the next scheduled nodes
+- an auditable sequence of plan, approval, job, and finalization events
+
+A replacement `MacroAgentGraphService` can connect to the same checkpoint database and continue the thread. The graph then polls the existing job instead of blindly submitting the side effect again.
+
+### 5. Idempotent Asynchronous Jobs
+
+`JobRecord` models the worker lifecycle:
+
+```text
+queued -> running -> succeeded
+                  -> queued -> ... -> failed
+                  -> cancel_requested -> cancelled
+```
+
+Each submission carries an idempotency key derived from the graph thread and step. If the same key is submitted again, the job store returns the existing `JobRecord`.
+
+The worker:
+
+- claims queued work
+- increments attempt count
+- runs asynchronous macro computation
+- requeues transient failures while retry budget remains
+- records terminal failures after retry exhaustion
+- checks for cancellation between compute-intensive phases
+- returns an artifact reference on success
+
+### 6. MCP Client and Tool Bridge
+
+`AsyncMcpStdioClient` communicates with an MCP server subprocess using newline-delimited JSON-RPC 2.0 frames.
+
+Implemented primitives:
+
+- `tools/list`
+- `tools/call`
+
+The client maps request IDs to pending futures, resolves responses in a background read loop, propagates reader failures, and terminates the subprocess during shutdown.
+
+`McpToolBridge` converts discovered MCP tool metadata into a native async callable while retaining the remote tool name, description, and input schema.
+
+### 7. Capability Governance
+
+External tools are registered as `RegisteredCapability` records with:
+
+- server and capability identity
+- capability kind
+- input schema
+- risk level
+- approval requirement
+- allowed roles
+- transport type
+
+`McpApprovalPolicyGate` evaluates tool calls deterministically:
+
+1. reject unregistered capabilities
+2. enforce role-based access control
+3. reject arguments outside the declared schema
+4. route high-risk operations to HITL approval
+5. allow only requests that pass every check
+
+The registry also demonstrates bearer-token validation and origin allowlisting for a remote HTTP transport boundary.
+
+### 8. Reducers and Auditability
+
+Reducers encode merge semantics instead of relying on incidental list behavior:
+
+- `reduce_append` preserves the complete event and error history
+- `reduce_unique_str_list` deduplicates active job IDs while preserving order
+- `reduce_artifact_refs` upserts structured records by `artifact_id` or `job_id`
+
+This makes state evolution inspectable and protects artifact metadata from duplicate node execution.
+
+### 9. Inherited Context, Retrieval, Memory, and Skills
+
+The previous project remains available under the same runtime package:
+
+- context deduplication, pruning, prioritization, and budget reports
+- BM25 and deterministic vector retrieval with reciprocal-rank fusion
+- citation maps and retrieved-content trust levels
+- working, episodic, semantic, and long-term memory models
+- SQLite memory with namespace isolation
+- progressive skill discovery and activation
+- typed tools, allowlists, retries, async execution, and tracing
+- structured ReAct trajectory models
+
+These modules form the context and reasoning plane; the new graph, jobs, and MCP packages form the durable orchestration plane.
 
 ## Test Matrix
 
 | Area | Coverage |
 | --- | --- |
-| Runtime loop | direct answer, tool call, max steps, V2 trajectory assertions |
-| Trajectory trace | AgentStep structure, causal event ordering, no raw CoT, StopReason |
-| Registry | allowlist, duplicate registration, schema listing |
-| Validation | invalid types, missing args, business boundary, unknown tool |
-| Error policy | transient retry self-healing, fatal unknown-tool stop |
-| Async executor | concurrency, timeout, idempotency |
-| Script runner | approved scripts, path traversal, timeout |
-| Retrieval | tokenizer, BM25, vector index, RRF, citations, insufficient evidence |
-| Context | deduplication, priority ordering, budget dropping, system retention |
-| Context pruning | stale item removal, trust/kind distributions, lost-in-middle warning |
-| Episodic memory | condensation, key decisions, error extraction, roundtrip, SQLite CRUD |
-| Working memory | defaults, remaining_steps, budget_critical, snapshot |
-| Memory policy | injection attack detection, namespace isolation, upsert |
+| Graph routing | direct answer, job loop, set-difference progress, hard step limit |
+| Human approval | approve, reject, edit/replan, second approval, side-effect guard |
+| Persistence | checkpoint history, restart recovery, thread isolation |
+| Reducers | append-only audit events, unique job IDs, artifact upsert |
+| Job lifecycle | idempotent submission, retry exhaustion, cancellation |
+| Durable integration | edit → approve → async job → pause → restart → recover |
+| MCP stdio | subprocess startup, `tools/list`, `tools/call`, shutdown |
+| MCP bridge | remote metadata converted into local async callables |
+| Capability registry | governed registration, bearer token, origin allowlist |
+| Approval policy | unknown tools, RBAC, schema injection, high-risk HITL routing |
+| Runtime loop | direct answer, tool calls, retries, max steps, structured trajectory |
+| Retrieval | tokenizer, chunking, BM25, vector index, RRF, citations |
+| Context | deduplication, pruning, ordering, budget, lost-in-the-middle warning |
+| Memory | working state, condensation, policy, namespace isolation, SQLite CRUD |
 | Skills | metadata discovery, activation, fuzzy selection, progressive disclosure |
-| Integration | RAG + skill fusion, adversarial prompt-injection immunization |
-| API | health check, run submission, polling, trace fetch, 404 boundary |
-
-Run all tests:
-
-```bash
-pytest -v
-```
+| API | health check, run submission, polling, trace fetch, 404 boundaries |
 
 Run one test file:
 
 ```bash
-pytest tests/test_context_pruning.py -v
+pytest tests/test_graph_approval.py -v
 ```
 
 Run one test:
 
 ```bash
-pytest tests/test_working_memory.py::test_budget_critical_when_high_utilization -v
+pytest tests/test_durable_macro_agent.py::test_durable_macro_research_agent_grand_lifecycle_and_crash_recovery -v
 ```
 
 ## Security Notice
 
-This project demonstrates application-level safety controls:
+This project demonstrates application-level controls:
 
-- tool allowlists
-- Pydantic validation
-- structured runtime errors
-- context trust levels
-- retrieved-evidence instruction boundaries
-- memory write filtering
-- context pruning and budget control
-- approved subprocess scripts
-- path checks
-- hard subprocess timeout
+- explicit human approval boundaries
+- capability registration and risk labels
+- role-based authorization
+- argument-schema validation
+- bearer-token and origin checks
+- idempotency keys around side effects
+- approved subprocess commands
+- context trust levels and memory-write filtering
+- bounded graph routing and structured audit events
 
-It is not a secure sandbox.
+It is not a secure sandbox or a production authorization system.
 
-Do not run untrusted scripts through this project. Do not expose the FastAPI service directly to the public internet. Do not treat the subprocess runner as an isolation boundary. Production-grade execution of untrusted code requires operating-system-level isolation such as containers, cgroups, seccomp, gVisor, Firecracker, separate users, filesystem restrictions, CPU and memory quotas, and network egress controls.
+Do not run untrusted MCP servers or scripts through this project. Do not expose the FastAPI service directly to the public internet. Subprocess separation is not an isolation boundary. Production execution of untrusted code requires operating-system controls such as containers, separate users, filesystem restrictions, CPU and memory quotas, syscall filtering, and network egress policy.
 
 ## Known Limitations
 
-- The vector index uses deterministic fake embeddings for tests, not production embeddings.
-- SQLite memory is local and minimal.
-- The API uses in-memory run tracking.
-- `WorkingMemory` is built at run start but not yet auto-populated from the runtime loop in all paths.
-- `EpisodeRecord` condensation is available as a library call; auto-condensation on run completion is future work.
-- Skill selection indexes metadata only; skill-local reference retrieval is future work.
-- Context token estimation is approximate.
-- The prompt-injection defense is an application-level boundary, not a formal security proof.
-- Provider integration is represented by `FakeProvider`; real model adapters are future work.
-- The subprocess runner is allowlisted but not OS-sandboxed.
+- The macro computation is simulated; it does not run a production ARIMA pipeline.
+- The current job-store implementation is process-local and in-memory despite its prototype class name.
+- Checkpoint durability uses SQLite, but production deployment still needs connection lifecycle and concurrency hardening.
+- The demo recovery path models service replacement while the worker and job store remain available; it is not a full machine-power-loss simulation.
+- MCP support covers the stdio primitives needed by the tests, not the complete protocol surface.
+- The HTTP transport checks are policy demonstrations, not a complete MCP HTTP server implementation.
+- The graph uses module-level infrastructure objects to simulate singleton dependency injection.
+- Artifact URIs are metadata examples; no production object store is connected.
+- Context token estimation and deterministic fake embeddings remain test-oriented.
+- Provider integration still uses a fake provider rather than a production model adapter.
+- Security controls are application-level demonstrations, not formal isolation or a security proof.
 
 ## Future Work
 
 Potential next steps:
 
-- real embedding provider adapters
-- persistent run store
-- auto-condensation: emit `EpisodeRecord` on every run completion
-- `WorkingMemory` population from runtime loop on each iteration
-- skill-scoped reference retrieval after activation
-- provider adapters for OpenAI-compatible APIs and local models
-- streaming responses
-- richer memory ranking and decay policy
-- context compaction and summarization
-- MCP-compatible tool registration
-- OS-level sandboxing for subprocess tools
-- golden dataset evaluation for retrieval and skill activation
-- trajectory replay and evaluation from persisted AgentStep sequences
+- replace the in-memory job store with transactional SQLite or PostgreSQL storage
+- add leases, heartbeats, and compare-and-swap job transitions for multiple workers
+- separate graph, worker, and MCP server into independently restartable processes
+- persist artifact metadata in an object-store-backed repository
+- add exponential-backoff timing and dead-letter handling
+- implement durable cancellation and worker recovery after process loss
+- support MCP Streamable HTTP in addition to stdio
+- add richer JSON Schema validation and capability versioning
+- connect real macro data sources and forecasting models
+- integrate retrieved evidence and selected skills directly into graph planning
+- add production provider adapters and streaming progress events
+- add OpenTelemetry traces and operational metrics
+- build golden-dataset evaluations for recovery, policy, and macro-analysis quality
 
 ## Design Summary
 
-The model is probabilistic. The runtime is deterministic.
+The model is probabilistic. Durable execution is deterministic.
 
-This project demonstrates a compact control plane for wrapping model behavior in explicit software boundaries: typed messages, schema-validated tools, registry allowlists, bounded loops, structured errors, trace events, retrieval trust levels, four-type memory, context pruning and budget reporting, episodic condensation, working memory models, and progressive skill activation.
+This project extends the previous context-and-memory runtime with explicit orchestration boundaries: typed graph state, checkpointed transitions, human decisions, idempotent jobs, non-blocking waits, worker retries, cancellation, artifact references, MCP process communication, and policy-governed capabilities.
 
-That is the core engineering move: let the model propose actions, but let deterministic runtime code decide what is allowed to happen, what context it sees, and what gets remembered.
+The engineering rule is simple: let the model propose research work, but let deterministic runtime code decide when it may run, how side effects are deduplicated, what survives a restart, and what evidence reaches the final report.
 
 ## License
 

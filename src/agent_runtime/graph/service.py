@@ -23,19 +23,18 @@ class MacroAgentGraphService:
         config = {"configurable": {"thread_id": thread_id}}
         initial_state = {"thread_id": thread_id, "run_id": run_id, "user_query": user_query, "status": "running"}
         
-        # 使用 stream 模式或普通 invoke。当遇到节点内部的 interrupt 时，图会在此处优雅中断抛出，
-        # 并将最新的 Checkpoint 存入数据库。我们使用 invoke 接收返回的状态
+        # Invoke the graph normally. An interrupt pauses execution here and persists the
+        # latest checkpoint; invoke then returns the paused state.
         return self.graph.invoke(initial_state, config=config)
 
     def resume_workflow(self, thread_id: str, review_action: dict) -> Dict[str, Any]:
-        """向处于中断挂起状态的 Thread 虚拟机注入外部人工审查判决，使其原地复活"""
+        """Resume an interrupted thread with an external human-review decision."""
         config = {"configurable": {"thread_id": thread_id}}
         
-        # 利用 langgraph.types.Command 优雅传递恢复数据给上一次阻断的 interrupt 接收器
-        # 这就是原生支持 Durable Execution 的高级恢复指令
+        # Use langgraph.types.Command to pass resume data to the interrupted node.
         resume_command = Command(resume=review_action)
         
-        # 传入包含 Command 的指令和对应的 Thread 隔离配置，驱动图向下推进
+        # Invoke with the command and thread-scoped configuration to continue execution.
         return self.graph.invoke(resume_command, config=config)
 
     def get_state_history(self, thread_id: str) -> List[Dict[str, Any]]:

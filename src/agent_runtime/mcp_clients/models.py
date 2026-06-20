@@ -3,7 +3,7 @@ from typing import Any, Literal, Optional, List
 from pydantic import BaseModel
 
 class RegisteredCapability(BaseModel):
-    """主进程接管的确定性标准安全能力模型"""
+    """Deterministic capability model governed by the main process."""
     server_id: str
     name: str
     kind: Literal["tool", "resource", "prompt"]

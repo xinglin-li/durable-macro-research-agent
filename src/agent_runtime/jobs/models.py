@@ -4,10 +4,10 @@ from pydantic import BaseModel, Field
 import time
 
 class JobRecord(BaseModel):
-    """底层任务存储层真相来源（Job Store 实体）"""
+    """Canonical job-store entity for the underlying task."""
     job_id: str
     job_type: str
-    idempotency_key: str  # 强幂等防线主键
+    idempotency_key: str  # Primary key for strict idempotency enforcement.
     status: Literal["queued", "running", "succeeded", "failed", "cancel_requested", "cancelled"]
     payload: Dict[str, Any]
     result: Optional[Dict[str, Any]] = None
