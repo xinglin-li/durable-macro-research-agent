@@ -1,4 +1,4 @@
-# durable-macro-research-agent
+# durable-agent-orchestration-lab
 
 A test-driven macro research agent that combines LangGraph durable execution, human-in-the-loop approval, asynchronous jobs, crash recovery, MCP tool bridging, and deterministic security controls.
 
@@ -128,7 +128,7 @@ This project keeps those modules and adds a durable execution plane:
 ## Repository Layout
 
 ```text
-durable-macro-research-agent/
+durable-agent-orchestration-lab/
   pyproject.toml
   README.md
   LICENSE
